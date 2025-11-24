@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 在线迷宫挑战 (Maze Challenge)
 
-## Getting Started
+一个使用 Next.js 和 Tailwind CSS 构建的在线迷宫小游戏。支持随机生成迷宫、多种难度、自动寻路提示以及战争迷雾模式。
 
-First, run the development server:
+## ✨ 特性
+
+- **随机迷宫**：使用 DFS 算法生成，保证每次都有解。
+- **多种难度**：提供简单、中等、困难、极限四种难度选择。
+- **画线寻路**：支持鼠标/手指拖动绘制路径，操作直观流畅。
+- **战争迷雾**：可开启迷雾模式，增加探索难度。
+- **智能提示**：遇到困难时可使用提示功能查看最短路径。
+- **响应式设计**：完美适配桌面端和移动端。
+
+## 🛠️ 技术栈
+
+- [Next.js](https://nextjs.org/) (App Router)
+- [React](https://react.dev/)
+- [TypeScript](https://www.typescriptlang.org/)
+- [Tailwind CSS](https://tailwindcss.com/)
+- HTML5 Canvas
+
+## 🚀 快速开始
+
+### 1. 安装依赖
+
+```bash
+npm install
+```
+
+### 2. 开发环境运行
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可开始游戏。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. 生产环境部署 (PM2)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+本项目已配置 PM2 支持，适合在生产环境中长期运行。
 
-## Learn More
+**前置要求**：请确保服务器已安装 Node.js 和 NPM。如果未安装 PM2，请先全局安装：
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm install -g pm2
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**部署步骤**：
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1.  **构建项目**：
 
-## Deploy on Vercel
+    ```bash
+    npm run build
+    ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+2.  **启动服务**：
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+    使用项目根目录下的 `ecosystem.config.js` 配置文件启动：
+
+    ```bash
+    pm2 start ecosystem.config.js
+    ```
+
+    或者使用 `npx` (如果未全局安装 PM2)：
+
+    ```bash
+    npx pm2 start ecosystem.config.js
+    ```
+
+3.  **管理服务**：
+
+    - 查看状态：`pm2 status`
+    - 查看日志：`pm2 logs`
+    - 重启服务：`pm2 restart migong`
+    - 停止服务：`pm2 stop migong`
+
+## 🎮 操作指南
+
+- **电脑端**：按住鼠标左键在迷宫格子上拖动，绘制通往终点的路线。
+- **移动端**：手指按住屏幕在迷宫上滑动，绘制路线。
+- **目标**：从左上角的蓝点出发，连接到右下角的红点。
+
+## 📄 License
+
+MIT

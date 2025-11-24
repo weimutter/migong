@@ -1,17 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { generateMaze, solveMaze, Maze, Cell, MAZE_SIZES, Difficulty } from '@/lib/maze';
-
-interface MazeGameProps {
-  difficulty: Difficulty;
-}
+import { generateMaze, solveMaze, Maze, MAZE_SIZES, Difficulty } from '@/lib/maze';
 
 const CELL_SIZE = 20;
 const WALL_THICKNESS = 2;
 const PLAYER_COLOR = '#3b82f6'; // blue-500
 const GOAL_COLOR = '#ef4444'; // red-500
-const PATH_COLOR = 'rgba(234, 179, 8, 0.5)'; // yellow-500 with opacity
+const PATH_COLOR = 'rgba(234, 179, 8, 0.5)'; // yellow-500
+const USER_PATH_COLOR = 'rgba(59, 130, 246, 0.6)'; // blue-500
 const VISITED_COLOR = '#ffffff';
 const UNVISITED_COLOR = '#000000'; // Dark mode background
 const WALL_COLOR = '#374151'; // gray-700
@@ -20,27 +17,33 @@ export default function MazeGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [maze, setMaze] = useState<Maze | null>(null);
-  const [playerPos, setPlayerPos] = useState({ x: 0, y: 0 });
   const [goalPos, setGoalPos] = useState({ x: 0, y: 0 });
-  const [path, setPath] = useState<{ x: number; y: number }[]>([]);
-  const [showPath, setShowPath] = useState(false);
+  
+  // 寻路提示路径
+  const [hintPath, setHintPath] = useState<{ x: number; y: number }[]>([]);
+  const [showHint, setShowHint] = useState(false);
+  
+  // 用户当前画出的路径
+  const [userPath, setUserPath] = useState<{ x: number; y: number }[]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+
   const [fogEnabled, setFogEnabled] = useState(false);
   const [gameStatus, setGameStatus] = useState<'playing' | 'won'>('playing');
 
   // 使用 ref 来存储最新的状态，避免 useEffect 频繁重新绑定
-  const playerPosRef = useRef(playerPos);
   const mazeRef = useRef(maze);
   const gameStatusRef = useRef(gameStatus);
   const goalPosRef = useRef(goalPos);
-  
-  // 触摸相关状态
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const userPathRef = useRef(userPath);
+  const isDrawingRef = useRef(isDrawing);
 
-  useEffect(() => { playerPosRef.current = playerPos; }, [playerPos]);
   useEffect(() => { mazeRef.current = maze; }, [maze]);
   useEffect(() => { gameStatusRef.current = gameStatus; }, [gameStatus]);
   useEffect(() => { goalPosRef.current = goalPos; }, [goalPos]);
-  const [steps, setSteps] = useState(0);
+  useEffect(() => { userPathRef.current = userPath; }, [userPath]);
+  useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
+
+  const [steps, setSteps] = useState(0); // 这里的步数现在指路径长度
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
@@ -49,10 +52,14 @@ export default function MazeGame() {
     const { rows, cols } = MAZE_SIZES[difficulty];
     const newMaze = generateMaze(rows, cols);
     setMaze(newMaze);
-    setPlayerPos({ x: 0, y: 0 });
     setGoalPos({ x: cols - 1, y: rows - 1 });
-    setPath([]);
-    setShowPath(false);
+    setHintPath([]);
+    setShowHint(false);
+    
+    // 初始化用户路径，起点为 (0,0)
+    const initialPath = [{ x: 0, y: 0 }];
+    setUserPath(initialPath);
+    
     setGameStatus('playing');
     setSteps(0);
     setStartTime(Date.now());
@@ -74,126 +81,143 @@ export default function MazeGame() {
     return () => clearInterval(interval);
   }, [gameStatus, startTime]);
 
-  // 移动逻辑
-  const move = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+  // 尝试移动到新格子
+  const tryMoveTo = useCallback((x: number, y: number) => {
     if (gameStatusRef.current !== 'playing' || !mazeRef.current) return;
+    
+    const currentPath = userPathRef.current;
+    if (currentPath.length === 0) return;
 
-    const { x, y } = playerPosRef.current;
-    const currentCell = mazeRef.current[y][x];
-    let newX = x;
-    let newY = y;
+    const lastPos = currentPath[currentPath.length - 1];
+    
+    // 如果已经在目标格子，不做任何事
+    if (lastPos.x === x && lastPos.y === y) return;
 
-    switch (direction) {
-      case 'up':
-        if (!currentCell.walls.top) newY--;
-        break;
-      case 'right':
-        if (!currentCell.walls.right) newX++;
-        break;
-      case 'down':
-        if (!currentCell.walls.bottom) newY++;
-        break;
-      case 'left':
-        if (!currentCell.walls.left) newX--;
-        break;
+    // 检查是否是回退（回到倒数第二个点）
+    if (currentPath.length > 1) {
+      const prevPos = currentPath[currentPath.length - 2];
+      if (prevPos.x === x && prevPos.y === y) {
+        // 回退，移除最后一个点
+        const newPath = currentPath.slice(0, -1);
+        setUserPath(newPath);
+        setSteps(newPath.length - 1);
+        return;
+      }
     }
 
-    if (newX !== x || newY !== y) {
-      setPlayerPos({ x: newX, y: newY });
-      setSteps(s => s + 1);
-      
-      // 检查是否到达终点
-      if (newX === goalPosRef.current.x && newY === goalPosRef.current.y) {
-        setGameStatus('won');
+    // 检查是否相邻
+    const dx = x - lastPos.x;
+    const dy = y - lastPos.y;
+    if (Math.abs(dx) + Math.abs(dy) !== 1) return; // 必须是上下左右相邻
+
+    // 检查是否有墙
+    const currentCell = mazeRef.current[lastPos.y][lastPos.x];
+    let blocked = false;
+    if (dx === 1 && currentCell.walls.right) blocked = true;
+    if (dx === -1 && currentCell.walls.left) blocked = true;
+    if (dy === 1 && currentCell.walls.bottom) blocked = true;
+    if (dy === -1 && currentCell.walls.top) blocked = true;
+
+    if (!blocked) {
+      // 检查该点是否已经在路径中（除了回退情况外，不允许自交）
+      // 简单的处理是不允许重复访问，或者允许环路？通常迷宫不允许环路。
+      // 这里我们简单检查是否已存在
+      const exists = currentPath.some(p => p.x === x && p.y === y);
+      if (!exists) {
+        const newPath = [...currentPath, { x, y }];
+        setUserPath(newPath);
+        setSteps(newPath.length - 1);
+
+        // 检查胜利
+        if (x === goalPosRef.current.x && y === goalPosRef.current.y) {
+          setGameStatus('won');
+          setIsDrawing(false);
+        }
       }
     }
   }, []);
 
-  // 处理键盘输入
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // 防止方向键滚动页面
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-        e.preventDefault();
-      }
-
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          move('up');
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          move('right');
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          move('down');
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          move('left');
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [move]);
-
-  // 处理触摸输入 (滑动)
+  // 处理输入事件
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const handleTouchStart = (e: TouchEvent) => {
-      e.preventDefault(); // 防止默认滚动
-      touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY
-      };
+    const getGridPos = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = Math.floor(((clientX - rect.left) * scaleX) / CELL_SIZE);
+      const y = Math.floor(((clientY - rect.top) * scaleY) / CELL_SIZE);
+      return { x, y };
     };
 
-    const handleTouchEnd = (e: TouchEvent) => {
-      if (!touchStartRef.current) return;
+    const handleStart = (e: MouseEvent | TouchEvent) => {
+      if (gameStatusRef.current !== 'playing') return;
+      e.preventDefault(); // 防止滚动
+      setIsDrawing(true);
       
-      const touchEnd = {
-        x: e.changedTouches[0].clientX,
-        y: e.changedTouches[0].clientY
-      };
-
-      const dx = touchEnd.x - touchStartRef.current.x;
-      const dy = touchEnd.y - touchStartRef.current.y;
-      
-      // 最小滑动距离
-      if (Math.abs(dx) < 30 && Math.abs(dy) < 30) return;
-
-      if (Math.abs(dx) > Math.abs(dy)) {
-        // 水平滑动
-        if (dx > 0) move('right');
-        else move('left');
+      let clientX, clientY;
+      if ('touches' in e) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
       } else {
-        // 垂直滑动
-        if (dy > 0) move('down');
-        else move('up');
+        clientX = (e as MouseEvent).clientX;
+        clientY = (e as MouseEvent).clientY;
+      }
+      
+      const { x, y } = getGridPos(clientX, clientY);
+      
+      // 如果点击的是当前路径的末端，则开始继续画
+      // 如果点击的是起跑线或者任意路径点，也可以支持（为了简单，目前假设总是接续末端）
+      // 这里加一个逻辑：如果点击位置不在路径末端附近，可能想重置？或者暂时不处理
+      // 实际上拖动式交互，通常只要按下去，就会尝试连接到最近的路径点，或者如果按在当前路径头，就开始延伸
+    };
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      if (!isDrawingRef.current || gameStatusRef.current !== 'playing') return;
+      e.preventDefault();
+
+      let clientX, clientY;
+      if ('touches' in e) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = (e as MouseEvent).clientX;
+        clientY = (e as MouseEvent).clientY;
       }
 
-      touchStartRef.current = null;
+      const { x, y } = getGridPos(clientX, clientY);
+      
+      // 边界检查
+      if (mazeRef.current && 
+          x >= 0 && x < mazeRef.current[0].length && 
+          y >= 0 && y < mazeRef.current.length) {
+        tryMoveTo(x, y);
+      }
     };
 
-    // 使用 passive: false 来允许 preventDefault
-    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-    canvas.addEventListener('touchend', handleTouchEnd);
-    
-    return () => {
-      canvas.removeEventListener('touchstart', handleTouchStart);
-      canvas.removeEventListener('touchend', handleTouchEnd);
+    const handleEnd = () => {
+      setIsDrawing(false);
     };
-  }, [move]);
+
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+
+    return () => {
+      canvas.removeEventListener('mousedown', handleStart);
+      canvas.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      
+      canvas.removeEventListener('touchstart', handleStart);
+      canvas.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [tryMoveTo]);
 
   // 渲染迷宫
   useEffect(() => {
@@ -217,32 +241,23 @@ export default function MazeGame() {
         const x = cell.x * CELL_SIZE;
         const y = cell.y * CELL_SIZE;
 
-        // 绘制地板 (可选，这里假设所有都是通路)
+        // 绘制地板
         ctx.fillStyle = VISITED_COLOR;
         ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
 
         // 绘制墙壁
         ctx.fillStyle = WALL_COLOR;
-        
-        if (cell.walls.top) {
-          ctx.fillRect(x, y, CELL_SIZE, WALL_THICKNESS);
-        }
-        if (cell.walls.right) {
-          ctx.fillRect(x + CELL_SIZE - WALL_THICKNESS, y, WALL_THICKNESS, CELL_SIZE);
-        }
-        if (cell.walls.bottom) {
-          ctx.fillRect(x, y + CELL_SIZE - WALL_THICKNESS, CELL_SIZE, WALL_THICKNESS);
-        }
-        if (cell.walls.left) {
-          ctx.fillRect(x, y, WALL_THICKNESS, CELL_SIZE);
-        }
+        if (cell.walls.top) ctx.fillRect(x, y, CELL_SIZE, WALL_THICKNESS);
+        if (cell.walls.right) ctx.fillRect(x + CELL_SIZE - WALL_THICKNESS, y, WALL_THICKNESS, CELL_SIZE);
+        if (cell.walls.bottom) ctx.fillRect(x, y + CELL_SIZE - WALL_THICKNESS, CELL_SIZE, WALL_THICKNESS);
+        if (cell.walls.left) ctx.fillRect(x, y, WALL_THICKNESS, CELL_SIZE);
       });
     });
 
-    // 绘制提示路径
-    if (showPath && path.length > 0) {
+    // 绘制提示路径 (黄色)
+    if (showHint && hintPath.length > 0) {
       ctx.fillStyle = PATH_COLOR;
-      path.forEach(pos => {
+      hintPath.forEach(pos => {
         ctx.fillRect(
           pos.x * CELL_SIZE + WALL_THICKNESS, 
           pos.y * CELL_SIZE + WALL_THICKNESS, 
@@ -250,6 +265,39 @@ export default function MazeGame() {
           CELL_SIZE - 2 * WALL_THICKNESS
         );
       });
+    }
+
+    // 绘制用户路径 (蓝色线条)
+    if (userPath.length > 0) {
+      ctx.strokeStyle = USER_PATH_COLOR;
+      ctx.lineWidth = CELL_SIZE / 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      ctx.beginPath();
+      const startX = userPath[0].x * CELL_SIZE + CELL_SIZE / 2;
+      const startY = userPath[0].y * CELL_SIZE + CELL_SIZE / 2;
+      ctx.moveTo(startX, startY);
+      
+      for (let i = 1; i < userPath.length; i++) {
+        const px = userPath[i].x * CELL_SIZE + CELL_SIZE / 2;
+        const py = userPath[i].y * CELL_SIZE + CELL_SIZE / 2;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      // 绘制当前头部
+      const head = userPath[userPath.length - 1];
+      ctx.fillStyle = PLAYER_COLOR;
+      ctx.beginPath();
+      ctx.arc(
+        head.x * CELL_SIZE + CELL_SIZE / 2,
+        head.y * CELL_SIZE + CELL_SIZE / 2,
+        CELL_SIZE / 4,
+        0,
+        2 * Math.PI
+      );
+      ctx.fill();
     }
 
     // 绘制终点
@@ -261,27 +309,15 @@ export default function MazeGame() {
       CELL_SIZE - 8
     );
 
-    // 绘制玩家
-    ctx.fillStyle = PLAYER_COLOR;
-    ctx.beginPath();
-    ctx.arc(
-      playerPos.x * CELL_SIZE + CELL_SIZE / 2,
-      playerPos.y * CELL_SIZE + CELL_SIZE / 2,
-      CELL_SIZE / 3,
-      0,
-      2 * Math.PI
-    );
-    ctx.fill();
-
     // 绘制战争迷雾
-    if (fogEnabled && gameStatus === 'playing') {
+    if (fogEnabled && gameStatus === 'playing' && userPath.length > 0) {
+      const head = userPath[userPath.length - 1];
+      const headX = head.x * CELL_SIZE + CELL_SIZE / 2;
+      const headY = head.y * CELL_SIZE + CELL_SIZE / 2;
+
       const gradient = ctx.createRadialGradient(
-        playerPos.x * CELL_SIZE + CELL_SIZE / 2,
-        playerPos.y * CELL_SIZE + CELL_SIZE / 2,
-        CELL_SIZE * 2,
-        playerPos.x * CELL_SIZE + CELL_SIZE / 2,
-        playerPos.y * CELL_SIZE + CELL_SIZE / 2,
-        CELL_SIZE * 5
+        headX, headY, CELL_SIZE * 2,
+        headX, headY, CELL_SIZE * 5
       );
       gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
       gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
@@ -292,28 +328,21 @@ export default function MazeGame() {
       // 完全遮挡远处
       ctx.beginPath();
       ctx.rect(0, 0, canvas.width, canvas.height);
-      ctx.arc(
-        playerPos.x * CELL_SIZE + CELL_SIZE / 2,
-        playerPos.y * CELL_SIZE + CELL_SIZE / 2,
-        CELL_SIZE * 5,
-        0,
-        Math.PI * 2,
-        true
-      );
+      ctx.arc(headX, headY, CELL_SIZE * 5, 0, Math.PI * 2, true);
       ctx.fillStyle = 'black';
       ctx.fill();
     }
 
-  }, [maze, playerPos, goalPos, difficulty, showPath, path, fogEnabled, gameStatus]);
+  }, [maze, userPath, goalPos, difficulty, showHint, hintPath, fogEnabled, gameStatus]);
 
   // 处理提示
   const handleHint = () => {
-    if (!maze) return;
-    const solution = solveMaze(maze, playerPos, goalPos);
-    setPath(solution);
-    setShowPath(true);
-    // 提示惩罚? 或者只是显示几秒钟
-    setTimeout(() => setShowPath(false), 2000);
+    if (!maze || userPath.length === 0) return;
+    const currentPos = userPath[userPath.length - 1];
+    const solution = solveMaze(maze, currentPos, goalPos);
+    setHintPath(solution);
+    setShowHint(true);
+    setTimeout(() => setShowHint(false), 2000);
   };
 
   return (
@@ -361,15 +390,15 @@ export default function MazeGame() {
         <span>时间: {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}</span>
       </div>
 
-      <div className="relative border-4 border-gray-800 dark:border-gray-600 rounded-lg shadow-lg overflow-hidden bg-gray-100">
-         <canvas ref={canvasRef} className="block" />
+      <div className="relative border-4 border-gray-800 dark:border-gray-600 rounded-lg shadow-lg overflow-hidden bg-gray-100 touch-none">
+         <canvas ref={canvasRef} className="block cursor-crosshair" />
          
          {gameStatus === 'won' && (
            <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
              <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-xl shadow-2xl transform scale-110">
                <h2 className="text-3xl font-bold mb-4 text-green-600 dark:text-green-400">🎉 通关成功!</h2>
                <p className="mb-2 text-gray-700 dark:text-gray-300">耗时: {Math.floor(elapsedTime / 60)}分 {elapsedTime % 60}秒</p>
-               <p className="mb-6 text-gray-700 dark:text-gray-300">步数: {steps}</p>
+               <p className="mb-6 text-gray-700 dark:text-gray-300">路径长度: {steps}</p>
                <button 
                  onClick={initGame}
                  className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-lg hover:shadow-xl"
@@ -382,7 +411,7 @@ export default function MazeGame() {
       </div>
       
       <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-        电脑端：方向键或 WASD 移动 | 移动端：在迷宫上滑动
+        按住鼠标或手指拖动来绘制路线
       </div>
     </div>
   );
